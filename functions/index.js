@@ -1,5 +1,6 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+require('dotenv').config();
 
 /*
 * Initialize Firebase App and firestore DB
@@ -13,7 +14,7 @@ let db = admin.firestore();
 */
 
 const firebaseConfig = {
-    apiKey: "AIzaSyB9RaIZ4Tb3wQq_fNYJqf7UMlAUOGCSdgI",
+    apiKey: process.env.API_KEY,
     authDomain: "socialapp-2bf83.firebaseapp.com",
     databaseURL: "https://socialapp-2bf83.firebaseio.com",
     projectId: "socialapp-2bf83",
