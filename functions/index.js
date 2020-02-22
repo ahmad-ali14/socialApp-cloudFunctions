@@ -41,7 +41,7 @@ firebase.initializeApp(firebaseConfig);
 * Get Screams
 */
 
-app.get('/screams', (request, response) => {
+app.get('/screams', (req, res) => {
     db.collection('screams').orderBy('createdAt', 'desc').get().then((snapshot) => {
         let screams = [];
         snapshot.forEach((doc) => {
@@ -52,7 +52,7 @@ app.get('/screams', (request, response) => {
               createdAt: doc.data().createdAt
           });
         });
-        return response.json(screams);
+        return res.json(screams);
       })
     .catch((err) => {
         console.log('Error getting documents', err);
@@ -64,29 +64,49 @@ app.get('/screams', (request, response) => {
 * Post a new Scream
 */
 
-app.post('/screams', (request, response) => {
+app.post('/screams', (req, res) => {
     let newScream = {
-        body: request.body.body,
+        body: req.body.body,
         createdAt:new Date().toISOString(),
-        userHandle: request.body.userHandle
+        userHandle: req.body.userHandle
     };
 
     db.collection('screams').add(newScream).then((doc)=>{
-        response.json({ message: `Document created => ${ doc.id }` })
+        res.json({ message: `Document created => ${ doc.id }` })
     })
     .catch((err) => {
         console.log('Error getting documents', err);
-        response.status(500).json({"err": "Somthing went Wrong"})
+        res.status(500).json({"err": "Somthing went Wrong"})
     });
     
 
 });
 
 /*
+* validation Functions
+*/
+
+const isEmpty = (str)=>{
+    if(str.trim() === ""){
+        return true;
+    } else{
+        return false;
+    }
+}
+
+const isEmail = (email) => {
+    const emailRegEx = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+
+    if (email.match(emailRegEx)) {return true;}
+    else { return false;}
+}
+
+/*
 * sign up route
 */
 
 app.post('/signup', (req, res)=> {
+    //extracting request data
     const newUser = {
         email: req.body.email,
         password: req.body.password,
@@ -94,13 +114,74 @@ app.post('/signup', (req, res)=> {
         handle: req.body.handle,
     }
 
-    firebase.auth().createUserWithEmailAndPassword(newUser.email, newUser.password).then((data)=>{
-        res.status(201).json({message: `User ${data.user.uid} Created Successfully`})
-    }) 
+    //validate request data
+    let errors = {};
+    if(isEmpty(newUser.email)){
+        errors.email = "must not be empty"
+    }
+    else if (!isEmail(newUser.email)){
+        errors.email = "Email should be Valid!"
+    }
+   if (isEmpty(newUser.password)){
+        errors.password = "Must not be empty"
+    }
+    if(newUser.password !== newUser.confirmPassword){
+        errors.confirmPassword = "confirm password Does not match"
+    }
+    if(isEmpty(newUser.handle)){
+        errors.handle = "must not be empty"
+    }
+
+    //break if there is an error
+    if (Object.keys(errors).length > 0){ 
+        return res.status(400).json(errors);
+    }
+
+    let token, userId;
+
+    //check if the username or userHandle existed before
+    db.doc(`/users/${newUser.handle}`).get().then((doc)=>{
+        //if handle existed, return Err
+        if(doc.exists){
+            return res.status(400).json({handle: "this userHandle has been taken"});
+        } else {
+            //else create user into Auth Db
+            return firebase.auth().createUserWithEmailAndPassword(newUser.email, newUser.password);
+        }
+    })
+    //extract user's Token and Id
+    .then((data)=>{
+        userId = data.user.uid;
+        return data.user.getIdToken();
+    })
+    //saving to our Db, After bieng saved to auth Db
+    .then((Token)=>{
+        token = Token;
+        const userCredentials = {
+            handle: newUser.handle,
+            email: newUser.email,
+            createdAt: new Date().toISOString(),
+            userId:userId,
+
+        }
+
+        //save new user into users collection
+        return db.doc(`/users/${newUser.handle}`).set(userCredentials)
+    })
+    //response
+    .then(()=>{
+        res.status(201).json({token})
+    })
     .catch((err) => {
         console.log('Error getting documents', err);
-        response.status(500).json({"error": err.code})
+        if(err.code === "auth/email-already-in-use"){
+            return res.status(400).json({email: "this email has been taken"});
+        }else{
+        res.status(500).json({"error": err})
+        }
     });
+
+   
 });
  
 
