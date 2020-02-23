@@ -94,10 +94,13 @@ app.get('/screams',  (req, res) => {
         let screams = [];
         snapshot.forEach((doc) => {
           screams.push({
-              id: doc.id,
+              screamId: doc.id,
               body: doc.data().body,
               userHandle: doc.data().userHandle,
-              createdAt: doc.data().createdAt
+              createdAt: doc.data().createdAt,
+              userImage: doc.data().userImage,
+              likeCount:doc.data().likeCount,
+              commentCount:doc.data().commentCount
           });
         });
         return res.json(screams);
@@ -129,7 +132,7 @@ app.post('/scream', FBauth , (req, res) => {
     })
     .catch((err) => {
         console.log('Error getting documents', err);
-        res.status(500).json({"err": "Somthing went Wrong"})
+        res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"})
     });
     
 
@@ -164,7 +167,7 @@ app.get('/scream/:screamId', (req, res) => {
       })
       .catch((err) => {
         console.error(err);
-        res.status(500).json({ error: err.code });
+        res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
       });
    });
 
@@ -202,7 +205,7 @@ app.post('/scream/:screamId/comment', FBauth, (req, res) => {
     })
     .catch((err) => {
       console.log(err);
-      res.status(500).json({ error: 'Something went wrong' });
+      res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
     
 
@@ -231,7 +234,7 @@ app.delete('/scream/:screamId', FBauth, (req, res) => {
     })
     .catch((err) => {
       console.error(err);
-      return res.status(500).json({ error: err.code });
+      return res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
   
 });
@@ -282,7 +285,7 @@ app.get('/scream/:screamId/like', FBauth, (req, res) => {
     })
     .catch((err) => {
       console.error(err);
-      res.status(500).json({ error: err.code });
+      res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
 
 });
@@ -330,7 +333,7 @@ app.get('/scream/:screamId/unlike', FBauth, (req, res) => {
     })
     .catch((err) => {
       console.error(err);
-      res.status(500).json({ error: err.code });
+      res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
 
 });
@@ -448,7 +451,7 @@ app.post('/signup', (req, res)=> {
         if(err.code === "auth/email-already-in-use"){
              res.status(400).json({email: "this email has been taken"});
         }else{
-         res.status(500).json({"error": err})
+         res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"})
         }
     });
 
@@ -492,13 +495,10 @@ app.post('/login', (req, res)=> {
         res.json({token})
     })
     .catch((err) => {
-        console.log('Error', err);
-        if(err.code === "auth/wrong-password"){
+     
              res.status(403).json({general: "wrong credentials, try again"});
-        }else{
-         res.status(500).json({"error": err})
-        }
-    });
+        
+        });
 
 });
 
@@ -534,7 +534,7 @@ app.post('/user', FBauth, (req, res) =>{
     })
     .catch((err) => {
       console.error(err);
-      return res.status(500).json({ error: err.code });
+      return res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
 
 });
@@ -580,7 +580,7 @@ app.get('/user', FBauth, (req, res) =>{
       })
       .catch((err) => {
         console.error(err);
-        return res.status(500).json({ error: err.code });
+        return res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
       });
 });
 
@@ -619,7 +619,7 @@ app.get('/user/:handle',  (req, res) =>{
     })
     .catch((err) => {
       console.error(err);
-      return res.status(500).json({ error: err.code });
+      return res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
    
 });
@@ -638,7 +638,7 @@ app.post('/notifications', FBauth, (req, res) =>{
     })
     .catch((err) => {
       console.error(err);
-      return res.status(500).json({ error: err.code });
+      return res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
     });
    
 });
@@ -695,7 +695,7 @@ app.post('/user/image', FBauth , (req, res)=>{
           })
           .catch((err) => {
             console.error(err);
-            return res.status(500).json({ error: 'something went wrong' });
+            return res.status(500).json({"general": "somthing Went Wrong, please Try Again Later!!"});
           });
       });
 
@@ -778,7 +778,8 @@ exports.createNotificationOnComment = functions.region('europe-west1')
 
 
 /*
-* Notifictions Function on Change profile Image for a user
+* Trigger to change every scream and comment user when the user changes his profile
+* image
 */ 
 
 exports.onUserImageChange = functions.region('europe-west1')
@@ -788,10 +789,8 @@ exports.onUserImageChange = functions.region('europe-west1')
     if (change.before.data().imageUrl !== change.after.data().imageUrl) {
       console.log('image has changed');
       const batch = db.batch();
-      return db
-        .collection('screams')
-        .where('userHandle', '==', change.before.data().handle)
-        .get()
+      return db.collection('screams')
+        .where('userHandle', '==', change.before.data().handle).get()
         .then((data) => {
           data.forEach((doc) => {
             const scream = db.doc(`/screams/${doc.id}`);
@@ -802,35 +801,28 @@ exports.onUserImageChange = functions.region('europe-west1')
     } else return true;
   });
 
+
 /*
-* Notifictions Function on Delete a Scream
+* Trigger to delete every comment, like and notifications linked to a scream 
+* if this scream is deleted
 */ 
 
 exports.onScreamDelete = functions.region('europe-west1')
   .firestore.document('/screams/{screamId}').onDelete((snapshot, context) => {
     const screamId = context.params.screamId;
     const batch = db.batch();
-    return db
-      .collection('comments')
-      .where('screamId', '==', screamId)
-      .get()
-      .then((data) => {
+    return db.collection('comments').where('screamId', '==', screamId).get()
+    .then((data) => {
         data.forEach((doc) => {
           batch.delete(db.doc(`/comments/${doc.id}`));
         });
-        return db
-          .collection('likes')
-          .where('screamId', '==', screamId)
-          .get();
+        return db.collection('likes').where('screamId', '==', screamId).get();
       })
       .then((data) => {
         data.forEach((doc) => {
           batch.delete(db.doc(`/likes/${doc.id}`));
         });
-        return db
-          .collection('notifications')
-          .where('screamId', '==', screamId)
-          .get();
+        return db.collection('notifications').where('screamId', '==', screamId).get();
       })
       .then((data) => {
         data.forEach((doc) => {
