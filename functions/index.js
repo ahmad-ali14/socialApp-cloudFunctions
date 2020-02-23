@@ -61,6 +61,7 @@ const FBauth = (req, res, next)=>{
     })
     .then((data)=>{
         req.user.handle = data.docs[0].data().handle;
+        req.user.imageUrl = data.docs[0].data().imageUrl;
         return next();
     })
     .catch((err) => {
@@ -72,6 +73,17 @@ const FBauth = (req, res, next)=>{
 
 
 }
+
+
+/*
+*
+*
+* Screams Routes
+* Screams Functions
+*
+*
+*
+*/
 
 /*
 * Get Screams
@@ -100,15 +112,20 @@ app.get('/screams',  (req, res) => {
 * Post a new Scream
 */
 
-app.post('/screams', FBauth , (req, res) => {
+app.post('/scream', FBauth , (req, res) => {
     let newScream = {
         body: req.body.body,
         createdAt:new Date().toISOString(),
-        userHandle: req.user.handle
+        userHandle: req.user.handle,
+        userImage: req.user.imageUrl,
+        likeCount:0,
+        commentCount:0
     };
 
     db.collection('screams').add(newScream).then((doc)=>{
-        res.json({ message: `Document created => ${ doc.id }` })
+        const resScream = newScream;
+        resScream.screamId = doc.id;
+        res.json(resScream);
     })
     .catch((err) => {
         console.log('Error getting documents', err);
@@ -118,8 +135,214 @@ app.post('/screams', FBauth , (req, res) => {
 
 });
 
+
 /*
+* Get One Scream Details
+*/
+
+app.get('/scream/:screamId', (req, res) => {
+    let screamData = {};
+
+    //fetching DB for a scream
+    db.doc(`/screams/${req.params.screamId}`).get().then((doc) => {
+        if (!doc.exists) {
+          return res.status(404).json({ error: 'Scream not found' });
+        }
+        screamData = doc.data();
+        screamData.screamId = doc.id;
+
+        //Fetching Comments on this scream
+        return db.collection('comments').orderBy('createdAt', 'desc')
+          .where('screamId', '==', req.params.screamId).get();
+      })
+      .then((data) => {
+        screamData.comments = [];
+        data.forEach((doc) => {
+          screamData.comments.push(doc.data());
+        });
+        return res.json(screamData);
+      })
+      .catch((err) => {
+        console.error(err);
+        res.status(500).json({ error: err.code });
+      });
+   });
+
+
+/*
+* Post one Comment on A scream 
+*/
+
+app.post('/scream/:screamId/comment', FBauth, (req, res) => {
+    //validate submitted data
+    if (req.body.body.trim() === '')
+    return res.status(400).json({ comment: 'Must not be empty' });
+
+  const newComment = {
+    body: req.body.body,
+    createdAt: new Date().toISOString(),
+    screamId: req.params.screamId,
+    userHandle: req.user.handle,
+    userImage: req.user.imageUrl
+  };
+  //console.log(newComment);
+
+  //query Db for that scream
+  db.doc(`/screams/${req.params.screamId}`).get().then((doc) => {
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'Scream not found' });
+      }
+      return doc.ref.update({ commentCount: doc.data().commentCount + 1 });
+    })
+    .then(() => {
+      return db.collection('comments').add(newComment);
+    })
+    .then(() => {
+      res.json(newComment);
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({ error: 'Something went wrong' });
+    });
+    
+
+});
+
+/*
+* Delete a scream
+*/
+
+app.delete('/scream/:screamId', FBauth, (req, res) => {
+    //fetch screams collection for this scream
+    const document = db.doc(`/screams/${req.params.screamId}`);
+  
+    document.get().then((doc) => {
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'Scream not found' });
+      }
+      if (doc.data().userHandle !== req.user.handle) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      } else {
+        return document.delete();
+      }
+    })
+    .then(() => {
+      res.json({ message: 'Scream deleted successfully' });
+    })
+    .catch((err) => {
+      console.error(err);
+      return res.status(500).json({ error: err.code });
+    });
+  
+});
+
+
+
+/*
+* Like a scream
+*/
+
+app.get('/scream/:screamId/like', FBauth, (req, res) => {
+
+    //fetching likes collection ofr this scream if it's liked by this user or not
+    const likeDocument = db.collection('likes')
+    .where('userHandle', '==', req.user.handle)
+    .where('screamId', '==', req.params.screamId).limit(1);
+
+  //fetching screams collection for this scream  
+  const screamDocument = db.doc(`/screams/${req.params.screamId}`);
+
+  let screamData;
+
+  screamDocument.get().then((doc) => {
+      if (doc.exists) {
+        screamData = doc.data();
+        screamData.screamId = doc.id;
+        return likeDocument.get();
+      } else {
+        return res.status(404).json({ error: 'Scream not found' });
+      }
+    })
+    .then((data) => {
+      if (data.empty) {
+        return db.collection('likes').add({
+            screamId: req.params.screamId,
+            userHandle: req.user.handle
+          })
+          .then(() => {
+            screamData.likeCount++;
+            return screamDocument.update({ likeCount: screamData.likeCount });
+          })
+          .then(() => {
+            return res.json(screamData);
+          });
+      } else {
+        return res.status(400).json({ error: 'Scream already liked' });
+      }
+    })
+    .catch((err) => {
+      console.error(err);
+      res.status(500).json({ error: err.code });
+    });
+
+});
+
+
+/*
+* Unlike a scream
+*/
+
+app.get('/scream/:screamId/unlike', FBauth, (req, res) => {
+
+    //fetching likes collection ofr this scream if it's liked by this user or not
+    const likeDocument = db.collection('likes')
+    .where('userHandle', '==', req.user.handle)
+    .where('screamId', '==', req.params.screamId)
+    .limit(1);
+
+
+     //fetching screams collection for this scream 
+    const screamDocument = db.doc(`/screams/${req.params.screamId}`);
+
+  let screamData;
+
+  screamDocument.get().then((doc) => {
+      if (doc.exists) {
+        screamData = doc.data();
+        screamData.screamId = doc.id;
+        return likeDocument.get();
+      } else {
+        return res.status(404).json({ error: 'Scream not found' });
+      }
+    })
+    .then((data) => {
+      if (data.empty) {
+        return res.status(400).json({ error: 'Scream not liked' });
+      } else {
+        return db.doc(`/likes/${data.docs[0].id}`).delete().then(() => {
+            screamData.likeCount--;
+            return screamDocument.update({ likeCount: screamData.likeCount });
+          })
+          .then(() => {
+            res.json(screamData);
+          });
+      }
+    })
+    .catch((err) => {
+      console.error(err);
+      res.status(500).json({ error: err.code });
+    });
+
+});
+
+
+
+/*
+*
+*
 * validation Functions
+*
+*
 */
 
 const isEmpty = (str)=>{
@@ -136,6 +359,16 @@ const isEmail = (email) => {
     if (email.match(emailRegEx)) {return true;}
     else { return false;}
 }
+
+/*
+*
+*
+* User Routes
+* User Functions
+*
+*
+*
+*/
 
 /*
 * sign up route
@@ -276,6 +509,7 @@ app.post('/login', (req, res)=> {
 app.post('/user', FBauth, (req, res) =>{
      let userDetails = {};
 
+     //validate submitted req data
      if(!isEmpty(req.body.bio.trim())){
          userDetails.bio = req.body.bio.trim();
      }
@@ -292,6 +526,62 @@ app.post('/user', FBauth, (req, res) =>{
          userDetails.location = req.body.location;
      }
 
+    //updata DB with submitted data after validation
+     db.doc(`/users/${req.user.handle}`)
+    .update(userDetails)
+    .then(() => {
+      return res.json({ message: 'Details added successfully' });
+    })
+    .catch((err) => {
+      console.error(err);
+      return res.status(500).json({ error: err.code });
+    });
+
+});
+
+
+/*
+* Get OWN user Details
+*/
+app.get('/user', FBauth, (req, res) =>{
+    let userData = {};
+    
+    //Query users db for user document details, Since it is aprotected route we have accssess to req.user Object.
+    db.doc(`/users/${req.user.handle}`).get().then((doc) => {
+        if (doc.exists) {
+          userData.credentials = doc.data();
+          //query likes DB for getting screams that are liked by this user.
+          return db.collection('likes').where('userHandle', '==', req.user.handle)
+             .get();
+        }
+      })
+      .then((data) => {
+        userData.likes = [];
+        data.forEach((doc) => {
+          userData.likes.push(doc.data());
+        });
+        return db.collection('notifications').where('recipient', '==', req.user.handle)
+          .orderBy('createdAt', 'desc').limit(10).get();
+      })
+      .then((data) => {
+        userData.notifications = [];
+        data.forEach((doc) => {
+          userData.notifications.push({
+            recipient: doc.data().recipient,
+            sender: doc.data().sender,
+            createdAt: doc.data().createdAt,
+            screamId: doc.data().screamId,
+            type: doc.data().type,
+            read: doc.data().read,
+            notificationId: doc.id
+          });
+        });
+        return res.json(userData);
+      })
+      .catch((err) => {
+        console.error(err);
+        return res.status(500).json({ error: err.code });
+      });
 });
 
 
@@ -358,3 +648,28 @@ app.post('/user/image', FBauth , (req, res)=>{
 */
 
 exports.api = functions.region("europe-west1").https.onRequest(app);
+
+
+/*
+* Notifictions Function on Like Scream
+*/
+
+exports.createNotificationOnLike = functions.region('europe-west1').firestore.document('likes/{id}')
+  .onCreate((snapshot) => {
+    return db.doc(`/screams/${snapshot.data().screamId}`).get().then((doc) => {
+        if (
+          doc.exists &&
+          doc.data().userHandle !== snapshot.data().userHandle
+        ) {
+          return db.doc(`/notifications/${snapshot.id}`).set({
+            createdAt: new Date().toISOString(),
+            recipient: doc.data().userHandle,
+            sender: snapshot.data().userHandle,
+            type: 'like',
+            read: false,
+            screamId: doc.id
+          });
+        }
+      })
+      .catch((err) => console.error(err));
+  });
